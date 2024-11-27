@@ -1,22 +1,62 @@
+import socket
+import platform
 from os import name
 from typing import Dict, Optional, TypedDict, Union, List
 import requests
+from .path_converter import convert_wsl_path_to_windows
 
 class FolderInfo(TypedDict):
     id: str
     name: str
 
+def get_windows_host():
+    """
+    Get the appropriate hostname to access Windows host from WSL2
+    Returns localhost for Windows, host.docker.internal for WSL2
+    """
+    if platform.system() == "Windows":
+        return "localhost"
+    
+    # Check if running in WSL
+    try:
+        with open('/proc/version', 'r') as f:
+            if 'microsoft' in f.read().lower():
+                return "host.docker.internal"
+    except:
+        pass
+    
+    return "localhost"  # fallback
 
 class EagleAPI:
-    def __init__(self, base_url="http://localhost:41595"):
-        self.base_url = base_url
+    def __init__(self, base_url=None):
+        """
+        Initialize Eagle API client
+        base_url: Optional override for the Eagle API endpoint
+        """
+        windows_host = get_windows_host()
+        self.base_url = base_url or f"http://{windows_host}:41595"
         self.folder_list: Optional[List[FolderInfo]] = None
+        
+        # Test connection on initialization
+        try:
+            self._send_request("/api/application/info")
+        except requests.RequestException as e:
+            print(f"Warning: Could not connect to Eagle API at {self.base_url}")
+            print(f"Error details: {str(e)}")
+            print("Make sure Eagle is running and the port is correct")
 
-    # #########################################
-    # 画像をEagleに送信
     def add_item_from_path(self, data, folder_id=None):
+        """
+        画像をEagleに送信
+        WSL2環境の場合はパスを変換
+        """
+        if "path" in data:
+            # LinuxパスをWindowsパスに変換
+            data["path"] = convert_wsl_path_to_windows(data["path"])
+            
         if folder_id:
             data["folderId"] = folder_id
+            
         return self._send_request("/api/item/addFromPath", method="POST", data=data)
 
 
